@@ -25,7 +25,7 @@ def translate_with_openai(text):
 """
 
     data = {
-        "model": "gpt-4o-mini",
+        "model": "gpt-4o",
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": text}
@@ -36,7 +36,10 @@ def translate_with_openai(text):
     response = requests.post(url, headers=headers, json=data)
     result = response.json()
 
+    if "choices" in result:
     return result["choices"][0]["message"]["content"]
+else:
+    return "暂时无法翻译，请稍后再试"
 
 
 @app.route("/webhook", methods=["POST"])
