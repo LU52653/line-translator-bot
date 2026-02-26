@@ -10,20 +10,32 @@ app = Flask(__name__)
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 
-# ✅ 强制结构输出 Prompt
-PROMPT_BOTH = """
-请把用户输入的内容整理流畅，并翻译成：
+PROMPT = """
+请先判断用户输入的语言。
 
-【JP】
-自然日本女性敬语表达，需要时可自然加入🙇表示尊重。
+规则如下：
 
-【KR】
-自然韩国敬语表达，不要添加表情。
+1️⃣ 如果是中文：
+输出：
+JP: 日文女性敬语翻译（可自然加入🙇）
+KR: 韩文敬语翻译（不要表情）
 
-必须严格按照以下格式输出：
+2️⃣ 如果是日文：
+输出：
+CN: 中文翻译
 
-JP: 日文翻译
-KR: 韩文翻译
+3️⃣ 如果是韩文：
+输出：
+CN: 中文翻译
+
+必须严格按照以下格式输出其中一种：
+
+JP: xxx
+KR: xxx
+
+或者
+
+CN: xxx
 
 不要添加解释，不要多余文字。
 """.strip()
@@ -36,7 +48,7 @@ def health():
 
 def call_openai(text: str):
     if not OPENAI_API_KEY:
-        return None, None
+        return None
 
     url = "https://api.openai.com/v1/chat/completions"
     headers = {
@@ -45,34 +57,26 @@ def call_openai(text: str):
     }
 
     data = {
-        "model": "gpt-4o-mini",   # ✅ 更省成本更稳定
+        "model": "gpt-4o-mini",
         "messages": [
-            {"role": "system", "content": PROMPT_BOTH},
-            {"role": "user", "content": text[:800]},  # ✅ 防止超长炸额度
+            {"role": "system", "content": PROMPT},
+            {"role": "user", "content": text[:800]},
         ],
-        "temperature": 0.1,  # ✅ 翻译类降低随机性
+        "temperature": 0.1,
     }
 
     try:
         resp = requests.post(url, headers=headers, json=data, timeout=20)
         if resp.status_code != 200:
-            return None, None
+            return None
 
         result = resp.json()
         content = result["choices"][0]["message"]["content"].strip()
-
-        # ✅ 强制解析 JP / KR
-        jp_match = re.search(r"JP:\s*(.*)", content)
-        kr_match = re.search(r"KR:\s*(.*)", content)
-
-        jp = jp_match.group(1).strip() if jp_match else ""
-        kr = kr_match.group(1).strip() if kr_match else ""
-
-        return jp, kr
+        return content
 
     except Exception as e:
         print("OpenAI error:", e, flush=True)
-        return None, None
+        return None
 
 
 @app.route("/webhook", methods=["POST"])
@@ -91,25 +95,36 @@ def webhook():
             user_text = event.get("message", {}).get("text", "").strip()
 
             if not user_text:
-                jp_text = "请输入要翻译的内容"
-                kr_text = ""
+                messages = [{"type": "text", "text": "请输入内容"}]
             else:
-                jp_text, kr_text = call_openai(user_text)
+                result = call_openai(user_text)
 
-                if not jp_text:
-                    jp_text = "翻译服务暂时不可用"
-                    kr_text = ""
+                if not result:
+                    messages = [{"type": "text", "text": "翻译服务暂时不可用"}]
+                else:
+                    # 判断返回结构
+                    if result.startswith("CN:"):
+                        # 日语或韩语 → 中文（一个气泡）
+                        cn_text = result.replace("CN:", "").strip()
+                        messages = [{"type": "text", "text": cn_text}]
+                    else:
+                        # 中文 → 日文 + 韩文（两个气泡）
+                        jp_match = re.search(r"JP:\s*(.*)", result)
+                        kr_match = re.search(r"KR:\s*(.*)", result)
+
+                        jp_text = jp_match.group(1).strip() if jp_match else ""
+                        kr_text = kr_match.group(1).strip() if kr_match else ""
+
+                        messages = []
+                        if jp_text:
+                            messages.append({"type": "text", "text": jp_text})
+                        if kr_text:
+                            messages.append({"type": "text", "text": kr_text})
 
             headers = {
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}",
             }
-
-            # ✅ 两个气泡发送
-            messages = [{"type": "text", "text": jp_text}]
-
-            if kr_text:
-                messages.append({"type": "text", "text": kr_text})
 
             reply_data = {
                 "replyToken": reply_token,
