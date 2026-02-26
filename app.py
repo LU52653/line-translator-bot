@@ -9,20 +9,14 @@ app = Flask(__name__)
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 
-PROMPT_JP = """
-请把用户输入的内容整理流畅，
-翻译成自然的日本女性敬语表达。
-语气成熟、稳重、有礼貌。
-在需要表示尊重时可以自然加入🙇。
-只输出翻译结果。
-""".strip()
+# ✅ 一个 Prompt 同时生成日文 + 韩文
+PROMPT_BOTH = """
+请把用户输入的内容整理流畅，并翻译成：
 
-PROMPT_KR = """
-请把用户输入的内容整理流畅，
-翻译成自然的韩国敬语表达。
-语气成熟、稳重、有礼貌。
-不要添加任何表情或说明。
-只输出翻译结果。
+第一行：自然日本女性敬语表达，需要时可自然加入🙇表示尊重。
+第二行：自然韩国敬语表达，不要添加表情。
+
+只输出两行结果，不要解释，不要多余文字。
 """.strip()
 
 
@@ -31,9 +25,9 @@ def health():
     return "ok", 200
 
 
-def call_openai(text: str, system_prompt: str) -> str:
+def call_openai(text: str):
     if not OPENAI_API_KEY:
-        return "翻译服务未配置"
+        return None, None
 
     url = "https://api.openai.com/v1/chat/completions"
     headers = {
@@ -44,7 +38,7 @@ def call_openai(text: str, system_prompt: str) -> str:
     data = {
         "model": "gpt-4o",
         "messages": [
-            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": PROMPT_BOTH},
             {"role": "user", "content": text},
         ],
         "temperature": 0.3,
@@ -53,15 +47,20 @@ def call_openai(text: str, system_prompt: str) -> str:
     resp = requests.post(url, headers=headers, json=data, timeout=20)
 
     if resp.status_code != 200:
-        return "翻译服务暂时不可用"
+        return None, None
 
     result = resp.json()
-    return result["choices"][0]["message"]["content"].strip()
+    content = result["choices"][0]["message"]["content"].strip()
 
+    # 拆分成两行
+    lines = content.split("\n")
+    if len(lines) >= 2:
+        jp = lines[0].strip()
+        kr = lines[1].strip()
+    else:
+        jp = content
+        kr = ""
 
-def translate_both(text: str):
-    jp = call_openai(text, PROMPT_JP)
-    kr = call_openai(text, PROMPT_KR)
     return jp, kr
 
 
@@ -81,25 +80,31 @@ def webhook():
             user_text = event.get("message", {}).get("text", "").strip()
 
             if not user_text:
-                final_text = "请输入要翻译的内容"
+                jp_text = "请输入要翻译的内容"
+                kr_text = ""
             else:
-                jp_text, kr_text = translate_both(user_text)
-                # 分成两个段落
-                final_text = f"{jp_text}\n\n{kr_text}"
+                jp_text, kr_text = call_openai(user_text)
+
+                if not jp_text:
+                    jp_text = "翻译服务暂时不可用"
+                    kr_text = ""
 
             headers = {
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}",
             }
 
+            # ✅ 两个 message 分开发送（两个气泡）
+            messages = [
+                {"type": "text", "text": jp_text}
+            ]
+
+            if kr_text:
+                messages.append({"type": "text", "text": kr_text})
+
             reply_data = {
                 "replyToken": reply_token,
-                "messages": [
-                    {
-                        "type": "text",
-                        "text": final_text
-                    }
-                ],
+                "messages": messages,
             }
 
             requests.post(
