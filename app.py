@@ -17,8 +17,8 @@ PROMPT = """
 
 1️⃣ 如果是中文：
 输出：
-JP: 日文女性敬语翻译（可自然加入🙇）
-KR: 韩文敬语翻译（不要表情）
+JP: 日文女性敬语表达（可自然加入🙇，不要标点符号）
+KR: 韩文正式书面敬语表达（使用“해 주시기 바랍니다”风格，不要任何符号或表情）
 
 2️⃣ 如果是日文：
 输出：
@@ -28,7 +28,7 @@ CN: 中文翻译
 输出：
 CN: 中文翻译
 
-必须严格按照以下格式输出其中一种：
+必须严格按照以下格式输出：
 
 JP: xxx
 KR: xxx
@@ -95,16 +95,31 @@ def webhook():
 
             if not user_text:
                 messages = [{"type": "text", "text": "请输入内容"}]
+
+            # ✅ 固定金额句式（不走 OpenAI）
+            elif re.match(r"您好，请将(\d+)韩元转至其他账户。谢谢。", user_text):
+                amount = re.match(
+                    r"您好，请将(\d+)韩元转至其他账户。谢谢。",
+                    user_text
+                ).group(1)
+
+                messages = [{
+                    "type": "text",
+                    "text": f"안녕하세요 다른 계좌로 {amount}원을 이체해 주시기 바랍니다 감사합니다"
+                }]
+
             else:
                 result = call_openai(user_text)
 
                 if not result:
                     messages = [{"type": "text", "text": "翻译服务暂时不可用"}]
                 else:
+                    # 日语或韩语 → 中文
                     if result.startswith("CN:"):
-                        # 日语或韩语 → 中文
                         cn_text = result.replace("CN:", "").strip()
                         messages = [{"type": "text", "text": cn_text}]
+
+                    # 中文 → 日文 + 韩文
                     else:
                         jp_match = re.search(r"JP:\s*(.*)", result)
                         kr_match = re.search(r"KR:\s*(.*)", result)
@@ -112,16 +127,16 @@ def webhook():
                         jp_text = jp_match.group(1).strip() if jp_match else ""
                         kr_text = kr_match.group(1).strip() if kr_match else ""
 
-                        # ✅ 日文清洗：只保留日文字符 + 🙇
+                        # ✅ 日文：去标点，保留日文字符 + 🙇
                         jp_text = re.sub(
-                            r"[^\u3040-\u30FF\u4E00-\u9FFF🙇\s]",
+                            r"[^\u3040-\u30FF\u4E00-\u9FFF🙇\s0-9]",
                             "",
                             jp_text
                         )
 
-                        # ✅ 韩文清洗：只保留韩文字
+                        # ✅ 韩文：只保留韩文 + 数字 + 空格
                         kr_text = re.sub(
-                            r"[^\uAC00-\uD7A3\s]",
+                            r"[^\uAC00-\uD7A3\s0-9]",
                             "",
                             kr_text
                         )
