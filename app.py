@@ -23,7 +23,7 @@ def health():
     return "ok", 200
 
 
-def translate_with_openai(text):
+def translate_with_openai(text: str) -> str:
     if not OPENAI_API_KEY:
         print("OPENAI_API_KEY is missing", flush=True)
         return "暂时无法翻译：未配置OPENAI_API_KEY"
@@ -51,15 +51,30 @@ def translate_with_openai(text):
     print("OpenAI status:", resp.status_code, flush=True)
     print("OpenAI raw response:", resp.text[:2000], flush=True)
 
+    # 先解析 json（即使失败也要兜底）
     try:
         result = resp.json()
     except Exception as e:
         print("OpenAI json parse error:", repr(e), flush=True)
         return "暂时无法翻译，请稍后再试"
 
+    # 非 200：根据错误码给更明确提示
     if resp.status_code != 200:
+        err = (result or {}).get("error", {}) if isinstance(result, dict) else {}
+        code = err.get("code")
+        msg = err.get("message", "")
+
+        if code == "insufficient_quota":
+            return "翻译服务额度不足（OpenAI欠费/配额已用完），请充值后再试。"
+        if resp.status_code in (401, 403):
+            return "翻译服务鉴权失败（OpenAI Key无效或无权限），请检查OPENAI_API_KEY。"
+        if resp.status_code == 429:
+            return "翻译请求过于频繁或额度不足，请稍后再试。"
+
+        print("OpenAI error code:", code, "message:", msg[:300], flush=True)
         return "暂时无法翻译，请稍后再试"
 
+    # 200：取正常结果
     try:
         return result["choices"][0]["message"]["content"].strip()
     except Exception as e:
@@ -94,7 +109,6 @@ def webhook():
                     "Content-Type": "application/json",
                     "Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}",
                 }
-
                 reply_data = {
                     "replyToken": reply_token,
                     "messages": [{"type": "text", "text": translated}],
