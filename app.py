@@ -3,20 +3,29 @@ import requests
 import os
 import json
 import time
+import re
 
 app = Flask(__name__)
 
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 
-# ✅ 一个 Prompt 同时生成日文 + 韩文
+# ✅ 强制结构输出 Prompt
 PROMPT_BOTH = """
 请把用户输入的内容整理流畅，并翻译成：
 
-第一行：自然日本女性敬语表达，需要时可自然加入🙇表示尊重。
-第二行：自然韩国敬语表达，不要添加表情。
+【JP】
+自然日本女性敬语表达，需要时可自然加入🙇表示尊重。
 
-只输出两行结果，不要解释，不要多余文字。
+【KR】
+自然韩国敬语表达，不要添加表情。
+
+必须严格按照以下格式输出：
+
+JP: 日文翻译
+KR: 韩文翻译
+
+不要添加解释，不要多余文字。
 """.strip()
 
 
@@ -36,32 +45,34 @@ def call_openai(text: str):
     }
 
     data = {
-        "model": "gpt-4o",
+        "model": "gpt-4o-mini",   # ✅ 更省成本更稳定
         "messages": [
             {"role": "system", "content": PROMPT_BOTH},
-            {"role": "user", "content": text},
+            {"role": "user", "content": text[:800]},  # ✅ 防止超长炸额度
         ],
-        "temperature": 0.3,
+        "temperature": 0.1,  # ✅ 翻译类降低随机性
     }
 
-    resp = requests.post(url, headers=headers, json=data, timeout=20)
+    try:
+        resp = requests.post(url, headers=headers, json=data, timeout=20)
+        if resp.status_code != 200:
+            return None, None
 
-    if resp.status_code != 200:
+        result = resp.json()
+        content = result["choices"][0]["message"]["content"].strip()
+
+        # ✅ 强制解析 JP / KR
+        jp_match = re.search(r"JP:\s*(.*)", content)
+        kr_match = re.search(r"KR:\s*(.*)", content)
+
+        jp = jp_match.group(1).strip() if jp_match else ""
+        kr = kr_match.group(1).strip() if kr_match else ""
+
+        return jp, kr
+
+    except Exception as e:
+        print("OpenAI error:", e, flush=True)
         return None, None
-
-    result = resp.json()
-    content = result["choices"][0]["message"]["content"].strip()
-
-    # 拆分成两行
-    lines = content.split("\n")
-    if len(lines) >= 2:
-        jp = lines[0].strip()
-        kr = lines[1].strip()
-    else:
-        jp = content
-        kr = ""
-
-    return jp, kr
 
 
 @app.route("/webhook", methods=["POST"])
@@ -94,10 +105,8 @@ def webhook():
                 "Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}",
             }
 
-            # ✅ 两个 message 分开发送（两个气泡）
-            messages = [
-                {"type": "text", "text": jp_text}
-            ]
+            # ✅ 两个气泡发送
+            messages = [{"type": "text", "text": jp_text}]
 
             if kr_text:
                 messages.append({"type": "text", "text": kr_text})
@@ -107,12 +116,15 @@ def webhook():
                 "messages": messages,
             }
 
-            requests.post(
-                "https://api.line.me/v2/bot/message/reply",
-                headers=headers,
-                json=reply_data,
-                timeout=10,
-            )
+            try:
+                requests.post(
+                    "https://api.line.me/v2/bot/message/reply",
+                    headers=headers,
+                    json=reply_data,
+                    timeout=10,
+                )
+            except Exception as e:
+                print("LINE reply error:", e, flush=True)
 
     print("Webhook handled in", round(time.time() - start, 3), "sec", flush=True)
     return "OK", 200
