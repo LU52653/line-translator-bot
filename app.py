@@ -18,7 +18,7 @@ PROMPT = """
 1️⃣ 如果是中文：
 输出：
 JP: 日文女性敬语翻译（可自然加入🙇）
-KR: 韩文敬语翻译（绝对不要添加任何表情或特殊符号）
+KR: 韩文敬语翻译（不要表情）
 
 2️⃣ 如果是日文：
 输出：
@@ -71,8 +71,7 @@ def call_openai(text: str):
             return None
 
         result = resp.json()
-        content = result["choices"][0]["message"]["content"].strip()
-        return content
+        return result["choices"][0]["message"]["content"].strip()
 
     except Exception as e:
         print("OpenAI error:", e, flush=True)
@@ -102,12 +101,10 @@ def webhook():
                 if not result:
                     messages = [{"type": "text", "text": "翻译服务暂时不可用"}]
                 else:
-                    # 🔵 日语或韩语 → 中文（一个气泡）
                     if result.startswith("CN:"):
+                        # 日语或韩语 → 中文
                         cn_text = result.replace("CN:", "").strip()
                         messages = [{"type": "text", "text": cn_text}]
-
-                    # 🟢 中文 → 日文 + 韩文（两个气泡）
                     else:
                         jp_match = re.search(r"JP:\s*(.*)", result)
                         kr_match = re.search(r"KR:\s*(.*)", result)
@@ -115,8 +112,19 @@ def webhook():
                         jp_text = jp_match.group(1).strip() if jp_match else ""
                         kr_text = kr_match.group(1).strip() if kr_match else ""
 
-                        # ✅ 强制清洗韩文：只保留纯韩文字
-                        kr_text = re.sub(r"[^\uAC00-\uD7A3\s]", "", kr_text)
+                        # ✅ 日文清洗：只保留日文字符 + 🙇
+                        jp_text = re.sub(
+                            r"[^\u3040-\u30FF\u4E00-\u9FFF🙇\s]",
+                            "",
+                            jp_text
+                        )
+
+                        # ✅ 韩文清洗：只保留韩文字
+                        kr_text = re.sub(
+                            r"[^\uAC00-\uD7A3\s]",
+                            "",
+                            kr_text
+                        )
 
                         messages = []
                         if jp_text:
