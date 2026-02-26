@@ -8,6 +8,7 @@ app = Flask(__name__)
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 
+
 def translate_with_openai(text):
     url = "https://api.openai.com/v1/chat/completions"
 
@@ -19,7 +20,7 @@ def translate_with_openai(text):
     system_prompt = """
 请把用户输入的内容整理流畅，
 翻译成30岁韩国女性表达方式的自然敬语。
-必须自然、成熟、商务感。
+语气成熟、稳重、有礼貌。
 不要添加任何符号、表情、说明。
 只输出翻译结果。
 """
@@ -34,12 +35,16 @@ def translate_with_openai(text):
     }
 
     response = requests.post(url, headers=headers, json=data)
-    result = response.json()
+
+    try:
+        result = response.json()
+    except:
+        return "暂时无法翻译，请稍后再试"
 
     if "choices" in result:
-    return result["choices"][0]["message"]["content"]
-else:
-    return "暂时无法翻译，请稍后再试"
+        return result["choices"][0]["message"]["content"]
+    else:
+        return "暂时无法翻译，请稍后再试"
 
 
 @app.route("/webhook", methods=["POST"])
