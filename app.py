@@ -117,5 +117,7 @@ def webhook():
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", "10000"))
-    app.run(host="0.0.0.0", port=port)
+    port_str = os.environ.get("PORT", "10000")
+    print("PORT env =", os.environ.get("PORT"), flush=True)
+    print("Listening port =", port_str, flush=True)
+    app.run(host="0.0.0.0", port=int(port_str))
