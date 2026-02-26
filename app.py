@@ -9,19 +9,19 @@ app = Flask(__name__)
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 
-PROMPT_KR = """
+PROMPT_JP = """
 请把用户输入的内容整理流畅，
-翻译成30岁韩国女性表达方式的自然敬语。
+翻译成自然的日本女性敬语表达。
 语气成熟、稳重、有礼貌。
-不要添加任何符号、表情、说明。
+在需要表示尊重时可以自然加入🙇。
 只输出翻译结果。
 """.strip()
 
-PROMPT_JP = """
+PROMPT_KR = """
 请把用户输入的内容整理流畅，
-翻译成30岁日本女性表达方式的自然敬语（日语敬语）。
+翻译成自然的韩国敬语表达。
 语气成熟、稳重、有礼貌。
-不要添加任何符号、表情、说明。
+不要添加任何表情或说明。
 只输出翻译结果。
 """.strip()
 
@@ -31,31 +31,16 @@ def health():
     return "ok", 200
 
 
-def parse_target_and_text(user_text: str):
-    t = (user_text or "").strip()
-    lower = t.lower()
-
-    if lower.startswith("jp "):
-        return "jp", t[3:].strip()
-    if lower.startswith("kr "):
-        return "kr", t[3:].strip()
-
-    if t.startswith("日 "):
-        return "jp", t[2:].strip()
-    if t.startswith("韩 "):
-        return "kr", t[2:].strip()
-
-    return "kr", t  # 默认韩语
-
-
-def translate_with_openai(text: str, target: str) -> str:
+def call_openai(text: str, system_prompt: str) -> str:
     if not OPENAI_API_KEY:
-        return "暂时无法翻译：未配置OPENAI_API_KEY"
-
-    system_prompt = PROMPT_JP if target == "jp" else PROMPT_KR
+        return "翻译服务未配置"
 
     url = "https://api.openai.com/v1/chat/completions"
-    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {OPENAI_API_KEY}"}
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {OPENAI_API_KEY}",
+    }
+
     data = {
         "model": "gpt-4o",
         "messages": [
@@ -66,15 +51,18 @@ def translate_with_openai(text: str, target: str) -> str:
     }
 
     resp = requests.post(url, headers=headers, json=data, timeout=20)
-    result = resp.json()
 
     if resp.status_code != 200:
-        err = result.get("error", {}) if isinstance(result, dict) else {}
-        if err.get("code") == "insufficient_quota":
-            return "翻译服务额度不足（OpenAI欠费/配额已用完），请充值后再试。"
-        return "暂时无法翻译，请稍后再试"
+        return "翻译服务暂时不可用"
 
+    result = resp.json()
     return result["choices"][0]["message"]["content"].strip()
+
+
+def translate_both(text: str):
+    jp = call_openai(text, PROMPT_JP)
+    kr = call_openai(text, PROMPT_KR)
+    return jp, kr
 
 
 @app.route("/webhook", methods=["POST"])
@@ -90,18 +78,36 @@ def webhook():
     for event in data.get("events", []):
         if event.get("type") == "message" and event.get("message", {}).get("type") == "text":
             reply_token = event.get("replyToken")
-            user_text = event.get("message", {}).get("text", "")
+            user_text = event.get("message", {}).get("text", "").strip()
 
-            target, cleaned_text = parse_target_and_text(user_text)
-            if not cleaned_text:
-                translated = "请输入要翻译的内容（例如：kr 你好 / jp 你好）"
+            if not user_text:
+                final_text = "请输入要翻译的内容"
             else:
-                translated = translate_with_openai(cleaned_text, target)
+                jp_text, kr_text = translate_both(user_text)
+                # 分成两个段落
+                final_text = f"{jp_text}\n\n{kr_text}"
 
-            headers = {"Content-Type": "application/json", "Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}"}
-            reply_data = {"replyToken": reply_token, "messages": [{"type": "text", "text": translated}]}
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}",
+            }
 
-            requests.post("https://api.line.me/v2/bot/message/reply", headers=headers, json=reply_data, timeout=10)
+            reply_data = {
+                "replyToken": reply_token,
+                "messages": [
+                    {
+                        "type": "text",
+                        "text": final_text
+                    }
+                ],
+            }
+
+            requests.post(
+                "https://api.line.me/v2/bot/message/reply",
+                headers=headers,
+                json=reply_data,
+                timeout=10,
+            )
 
     print("Webhook handled in", round(time.time() - start, 3), "sec", flush=True)
     return "OK", 200
