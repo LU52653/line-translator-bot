@@ -18,7 +18,7 @@ PROMPT = """
 1️⃣ 如果是中文：
 输出：
 JP: 日文女性敬语翻译（可自然加入🙇）
-KR: 韩文敬语翻译（不要表情）
+KR: 韩文敬语翻译（绝对不要添加任何表情或特殊符号）
 
 2️⃣ 如果是日文：
 输出：
@@ -102,18 +102,21 @@ def webhook():
                 if not result:
                     messages = [{"type": "text", "text": "翻译服务暂时不可用"}]
                 else:
-                    # 判断返回结构
+                    # 🔵 日语或韩语 → 中文（一个气泡）
                     if result.startswith("CN:"):
-                        # 日语或韩语 → 中文（一个气泡）
                         cn_text = result.replace("CN:", "").strip()
                         messages = [{"type": "text", "text": cn_text}]
+
+                    # 🟢 中文 → 日文 + 韩文（两个气泡）
                     else:
-                        # 中文 → 日文 + 韩文（两个气泡）
                         jp_match = re.search(r"JP:\s*(.*)", result)
                         kr_match = re.search(r"KR:\s*(.*)", result)
 
                         jp_text = jp_match.group(1).strip() if jp_match else ""
                         kr_text = kr_match.group(1).strip() if kr_match else ""
+
+                        # ✅ 强制清洗韩文：只保留纯韩文字
+                        kr_text = re.sub(r"[^\uAC00-\uD7A3\s]", "", kr_text)
 
                         messages = []
                         if jp_text:
