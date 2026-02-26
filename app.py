@@ -18,6 +18,11 @@ SYSTEM_PROMPT = """
 """.strip()
 
 
+@app.route("/", methods=["GET", "HEAD"])
+def health():
+    return "ok", 200
+
+
 def translate_with_openai(text):
     if not OPENAI_API_KEY:
         print("OPENAI_API_KEY is missing", flush=True)
@@ -26,45 +31,40 @@ def translate_with_openai(text):
     url = "https://api.openai.com/v1/chat/completions"
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {OPENAI_API_KEY}"
+        "Authorization": f"Bearer {OPENAI_API_KEY}",
     }
-
     data = {
         "model": "gpt-4o",
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": text}
+            {"role": "user", "content": text},
         ],
-        "temperature": 0.3
+        "temperature": 0.3,
     }
 
     try:
-        response = requests.post(url, headers=headers, json=data, timeout=20)
+        resp = requests.post(url, headers=headers, json=data, timeout=20)
     except Exception as e:
         print("OpenAI request exception:", repr(e), flush=True)
         return "暂时无法翻译，请稍后再试"
 
-    print("OpenAI status:", response.status_code, flush=True)
-    print("OpenAI raw response:", response.text[:2000], flush=True)
+    print("OpenAI status:", resp.status_code, flush=True)
+    print("OpenAI raw response:", resp.text[:2000], flush=True)
 
     try:
-        result = response.json()
+        result = resp.json()
     except Exception as e:
         print("OpenAI json parse error:", repr(e), flush=True)
         return "暂时无法翻译，请稍后再试"
 
-    if response.status_code != 200:
+    if resp.status_code != 200:
         return "暂时无法翻译，请稍后再试"
 
-    if "choices" in result and result["choices"]:
+    try:
         return result["choices"][0]["message"]["content"].strip()
-    else:
+    except Exception as e:
+        print("OpenAI response format error:", repr(e), flush=True)
         return "暂时无法翻译，请稍后再试"
-
-
-@app.route("/", methods=["GET", "HEAD"])
-def health():
-    return "ok", 200
 
 
 @app.route("/webhook", methods=["POST"])
@@ -92,19 +92,19 @@ def webhook():
 
                 headers = {
                     "Content-Type": "application/json",
-                    "Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}"
+                    "Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}",
                 }
 
                 reply_data = {
                     "replyToken": reply_token,
-                    "messages": [{"type": "text", "text": translated}]
+                    "messages": [{"type": "text", "text": translated}],
                 }
 
                 r = requests.post(
                     "https://api.line.me/v2/bot/message/reply",
                     headers=headers,
                     json=reply_data,
-                    timeout=10
+                    timeout=10,
                 )
                 print("LINE reply status:", r.status_code, flush=True)
                 print("LINE reply body:", r.text[:1000], flush=True)
@@ -117,4 +117,5 @@ def webhook():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    port = int(os.environ.get("PORT", "10000"))
+    app.run(host="0.0.0.0", port=port)
