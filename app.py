@@ -46,6 +46,17 @@ def health():
     return "ok", 200
 
 
+# ✅ 简单语言判断（优先判断中文）
+def detect_language(text):
+    if re.search(r'[\u4E00-\u9FFF]', text):
+        return "zh"
+    elif re.search(r'[\u3040-\u30FF]', text):
+        return "jp"
+    elif re.search(r'[\uAC00-\uD7A3]', text):
+        return "kr"
+    return "other"
+
+
 def call_openai(text: str):
     if not OPENAI_API_KEY:
         return None
@@ -57,7 +68,7 @@ def call_openai(text: str):
     }
 
     data = {
-        "model": "gpt-4o-mini",
+        "model": "gpt-3.5-turbo",  # 保持3.5
         "messages": [
             {"role": "system", "content": PROMPT},
             {"role": "user", "content": text[:800]},
@@ -96,7 +107,6 @@ def webhook():
             if not user_text:
                 messages = [{"type": "text", "text": "请输入内容"}]
 
-            # ✅ 固定金额句式（不走 OpenAI）
             elif re.match(r"您好，请将(\d+)韩元转至其他账户。谢谢。", user_text):
                 amount = re.match(
                     r"您好，请将(\d+)韩元转至其他账户。谢谢。",
@@ -109,32 +119,35 @@ def webhook():
                 }]
 
             else:
+                lang = detect_language(user_text)  # ✅ 先本地判断
                 result = call_openai(user_text)
 
                 if not result:
                     messages = [{"type": "text", "text": "翻译服务暂时不可用"}]
                 else:
-                    # 日语或韩语 → 中文
-                    if result.startswith("CN:"):
-                        cn_text = result.replace("CN:", "").strip()
-                        messages = [{"type": "text", "text": cn_text}]
 
-                    # 中文 → 日文 + 韩文
-                    else:
+                    # ✅ 如果原文是日文或韩文
+                    if lang in ["jp", "kr"]:
+                        if result.startswith("CN:"):
+                            cn_text = result.replace("CN:", "").strip()
+                            messages = [{"type": "text", "text": cn_text}]
+                        else:
+                            messages = [{"type": "text", "text": result}]
+
+                    # ✅ 如果原文是中文（即使模型误返回CN，也强制解析JP/KR）
+                    elif lang == "zh":
                         jp_match = re.search(r"JP:\s*(.*)", result)
                         kr_match = re.search(r"KR:\s*(.*)", result)
 
                         jp_text = jp_match.group(1).strip() if jp_match else ""
                         kr_text = kr_match.group(1).strip() if kr_match else ""
 
-                        # ✅ 日文：去标点，保留日文字符 + 🙇
                         jp_text = re.sub(
                             r"[^\u3040-\u30FF\u4E00-\u9FFF🙇\s0-9]",
                             "",
                             jp_text
                         )
 
-                        # ✅ 韩文：只保留韩文 + 数字 + 空格
                         kr_text = re.sub(
                             r"[^\uAC00-\uD7A3\s0-9]",
                             "",
@@ -146,6 +159,9 @@ def webhook():
                             messages.append({"type": "text", "text": jp_text})
                         if kr_text:
                             messages.append({"type": "text", "text": kr_text})
+
+                    else:
+                        messages = [{"type": "text", "text": result}]
 
             headers = {
                 "Content-Type": "application/json",
