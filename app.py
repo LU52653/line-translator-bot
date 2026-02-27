@@ -57,7 +57,7 @@ def call_openai(text: str):
     }
 
     data = {
-        "model": "gpt-3.5-turbo",  # ✅ 仅修改这里
+        "model": "gpt-4o-mini",
         "messages": [
             {"role": "system", "content": PROMPT},
             {"role": "user", "content": text[:800]},
