@@ -57,7 +57,7 @@ def call_openai(text: str):
     }
 
     data = {
-        "model": "gpt-3.5-turbo",   # ✅ 已改为最早模型
+        "model": "gpt-3.5-turbo",  # ✅ 仅修改这里
         "messages": [
             {"role": "system", "content": PROMPT},
             {"role": "user", "content": text[:800]},
@@ -68,7 +68,6 @@ def call_openai(text: str):
     try:
         resp = requests.post(url, headers=headers, json=data, timeout=20)
         if resp.status_code != 200:
-            print("OpenAI status error:", resp.status_code, resp.text, flush=True)
             return None
 
         result = resp.json()
@@ -119,6 +118,8 @@ def webhook():
                     if result.startswith("CN:"):
                         cn_text = result.replace("CN:", "").strip()
                         messages = [{"type": "text", "text": cn_text}]
+
+                    # 中文 → 日文 + 韩文
                     else:
                         jp_match = re.search(r"JP:\s*(.*)", result)
                         kr_match = re.search(r"KR:\s*(.*)", result)
